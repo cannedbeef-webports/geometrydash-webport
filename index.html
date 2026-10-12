@@ -873,9 +873,6 @@
     const GD_PROXY_PREFIX =
       'https://gdwasmproxy.sutinognic.workers.dev/proxy.php?url=';
 
-    const ASSET_PROXY_PREFIX =
-      'https://gdproxy.temporeal918.workers.dev/?url=';
-
     let activeProxyPrefix = GD_PROXY_PREFIX;
 
     function formatProxyUrl(originalUrl, proxyPrefix) {
@@ -1430,10 +1427,10 @@
 
     async function fetchAsset(
       fileName,
-      targetUrl,
       label,
       basePct,
-      weightPct
+      weightPct,
+	  parts
     ) {
       if ('caches' in window) {
         try {
@@ -1479,97 +1476,44 @@
         }
       }
 
-      if (!targetUrl) {
-        throw new Error(`No URL provided for ${fileName} and it is not cached.`)
-      }
 
-      say(
-        `Fetching ${fileName} from ${targetUrl}...`
-      );
+	// cannedbeef addition: parts system (i think there already was ome but it was obsolete)
 
-      const response =
-        await nativeFetch(targetUrl);
+	function mergeArrayBuffers(buffers) {
+		const result = new Uint8Array(buffers.reduce((sum, buf) => sum + buf.byteLength, 0));
 
-      if (!response.ok) {
-        throw new Error(
-          `HTTP ${response.status} when downloading ${fileName}`
-        );
-      }
+		let offset = 0;
+		for (const buf of buffers) {
+			result.set(new Uint8Array(buf), offset);
+			offset += buf.byteLength;
+		}
 
-      const contentLength =
-        response.headers.get('content-length');
+		return result.buffer;
+	}
 
-      let buffer;
+	async function loadParts() {
+		const buffers = [];
 
-      if (!response.body) {
-        buffer =
-          await response.arrayBuffer();
-      } else {
-        const total = contentLength
-          ? parseInt(contentLength, 10)
-          : 0;
+		for (let i = 1; i <= parts; i++) {
+			const parturl = `assets/${fileName}.part${i}`;
+			const response = await nativeFetch(parturl);
+			say(`Fetching ${parturl}...`);
+			updateProgress(
+				basePct + (weightPct / (parts - i)),
+				`Loading ${parturl}`
+			);
 
-        let loaded = 0;
-        const reader = response.body.getReader();
-        const chunks = [];
+			if (!response.ok) throw new Error(`HTTP ${response.status} when downloading ${parturl}`);
 
-        while (true) {
-          const {
-            done,
-            value
-          } = await reader.read();
+			buffers.push(await response.arrayBuffer());
+		}
 
-          if (done) {
-            break;
-          }
+		return mergeArrayBuffers(buffers);
+	}
 
-          chunks.push(value);
-          loaded += value.length;
+	  let buffer = await loadParts();
 
-          const mbLoaded =
-            (loaded / (1024 * 1024)).toFixed(1);
-
-          if (total > 0) {
-            const chunkPct =
-              Math.round(
-                (loaded / total) * weightPct
-              );
-
-            const mbTotal =
-              (total / (1024 * 1024)).toFixed(1);
-
-            updateProgress(
-              basePct + chunkPct,
-              `Fetching ${label} (${mbLoaded} MB / ${mbTotal} MB)`
-            );
-          } else {
-            updateProgress(
-              basePct,
-              `Fetching ${label} (${mbLoaded} MB)`
-            );
-          }
-        }
-
-        const combined =
-          new Uint8Array(loaded);
-
-        let offset = 0;
-
-        for (const chunk of chunks) {
-          combined.set(
-            chunk,
-            offset
-          );
-
-          offset += chunk.length;
-        }
-
-        buffer =
-          combined.buffer;
-      }
-
-      const expectedSize =
-        EXPECTED_ASSET_SIZES[fileName];
+      const expectedSize = EXPECTED_ASSET_SIZES[fileName];
 
       if (
         expectedSize &&
@@ -1601,10 +1545,6 @@
         }
       }
 
-      updateProgress(
-        basePct + weightPct,
-        `Loaded ${label}`
-      );
 
       return buffer;
     }
@@ -3475,33 +3415,20 @@
         try {
           updateProgress(5, "Loading local engine files...");
 
-          const releaseBaseUrl =
-            'https://github.com/yoylecakefake/gdwasm/releases/download/Release/';
-
-          const wasmUrl =
-            `${ASSET_PROXY_PREFIX}${encodeURIComponent(
-              `${releaseBaseUrl}gd_web.wasm`
-            )}`;
-
-          const dataUrl =
-            `${ASSET_PROXY_PREFIX}${encodeURIComponent(
-              `${releaseBaseUrl}gd_web.data`
-            )}`;
-
           const wasmBuffer = await fetchAsset(
             'gd_web.wasm',
-            wasmUrl,
             'gd_web.wasm',
             5,
-            40
+            40,
+			3
           );
 
           const dataBuffer = await fetchAsset(
             'gd_web.data',
-            dataUrl,
             'gd_web.data',
             45,
-            45
+            45,
+			8
           );
 
           launchEngine(wasmBuffer, dataBuffer);
